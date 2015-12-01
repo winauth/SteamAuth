@@ -1,0 +1,24 @@
+{
+  "name": "SteamAuth",
+  "version": "0.1.0",
+  "description": "SteamGuard code generator",
+  "author": "Colin Mackie <winauth@gmail.com>",
+  "main": "index.js",
+  "dependencies": {
+    "rfc-3548-b32": "^0.0.2"
+  },
+  "devDependencies": {
+    "mocha": "^2.3.4",
+    "should": "^7.1.1",
+    "nock": "^3.3.2"
+  },
+  "scripts": {
+    "test": "node_modules/.bin/mocha"
+  },
+  "keywords": [
+    "WinAuth",
+    "SteamGuard",
+    "Steam"
+  ],
+  "license": "GPLv3"
+}
