@@ -8,6 +8,8 @@ var SteamAuth = require("../index.js");
 
 describe("SteamAuth", function()
 {
+	var interval = 48297900;
+
 	it ("should perform a time sync", function(done)
 	{
 		this.timeout(10000);
@@ -28,12 +30,44 @@ describe("SteamAuth", function()
 		});
 	});
 
+	it ("should create an instance from Base32", function(done)
+	{
+		var auth = new SteamAuth({secret:"STK7746GVMCHMNH5FBIAQXGPV3I7ZHRG"});
+		var code = auth.calculateCode({time:interval * 30000});
+		assert.equal(code, "9J4GW", "did not create instance from base32");
+		done();
+	});
+
+	it ("should create an instance from Base64", function(done)
+	{
+		var auth = new SteamAuth({secret:"lNX/88arBHY0/ShQCFzPrtH8niY="});
+		var code = auth.calculateCode({time:interval * 30000});
+		assert.equal(code, "9J4GW", "did not create instance from base32");
+		done();
+	});
+
+	it ("should create an instance from hex string", function(done)
+	{
+		var auth = new SteamAuth({secret:"94D5FFF3C6AB047634FD2850085CCFAED1FC9E26"});
+		var code = auth.calculateCode({time:interval * 30000});
+		assert.equal(code, "9J4GW", "did not create instance from base32");
+		done();
+	});
+
+	it ("should calculate codes from class method", function(done)
+	{
+		var code = SteamAuth.calculateCode({secret:"STK7746GVMCHMNH5FBIAQXGPV3I7ZHRG", time:interval * 30000});
+		assert.equal(code, "9J4GW", "did not calculate code from class methods");
+		done();
+	});
+
 	it ("should generate correct codes", function(done)
 	{
-		var auth = new SteamAuth({sync:false});
-
-		var interval = 48297900;
 		var secret = "STK7746GVMCHMNH5FBIAQXGPV3I7ZHRG";
+
+		var auth1 = new SteamAuth({secret:secret, sync:false});
+		var auth2 = new SteamAuth({sync:false});
+
 		var testcodes = [
 			"9J4GW","9KTV8","TY2MF","WXTYX","JCYC2","V6NXB","FMXY3","VQNKR","JN2VH","JM33B","GHBBP","H5N9M","QF2QQ","F9MDX","4FY8H",
 			"DBRQY","M56RD","XP242","TWFRN","VQMKJ","67QFR","MXRPF","63WTY","XDW97","WY9CW","MC5PG","JBTFP","M2PP4","M99RM","VKWN2",
@@ -59,8 +93,9 @@ describe("SteamAuth", function()
 
 		for (var i = 0; i < testcodes.length; i++)
 		{
-			var code = auth.calculateCode(secret, (interval + i) * 30000);
-			if (code != testcodes[i])
+			var code1 = auth1.calculateCode({time: (interval + i) * 30000});
+			var code2 = auth2.calculateCode(secret, (interval + i) * 30000);
+			if (code1 != testcodes[i] || code2 != testcodes[i])
 			{
 				done({message:"code mismatch"});
 				return;

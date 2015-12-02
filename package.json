@@ -1,6 +1,6 @@
 {
   "name": "SteamAuth",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SteamGuard code generator",
   "author": "Colin Mackie <winauth@gmail.com>",
   "main": "index.js",
@@ -10,10 +10,17 @@
   "devDependencies": {
     "mocha": "^2.3.4",
     "should": "^7.1.1",
-    "nock": "^3.3.2"
+    "nock": "^3.3.2",
+    "jshint": "latest",
+    "uglify": "latest",
+    "rimraf": "latest"
   },
   "scripts": {
-    "test": "node_modules/.bin/mocha"
+    "lint": "jshint **.js",
+    "wint": "for %f in (*.js) do jshint %f",
+    "uglify": "uglify index.js",
+    "test": "node_modules/.bin/mocha",
+    "clean": "rimraf dist"
   },
   "keywords": [
     "WinAuth",

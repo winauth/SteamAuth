@@ -1,3 +1,4 @@
+/*jslint node: true */
 "use strict";
 
 /*
@@ -45,6 +46,9 @@ var base32 = require('rfc-3548-b32');
  *     auth.calculateCode("ABCDEGHJ");
  *   });
  *
+ *   // or calculate code directly from SteamAuth - but the time must match Steam server
+ *   var code = SteamAuth.calculateCode("ABCDEGHJ", new Date().getTime());
+ *
  * @param options optional options object: sync: true(default)/false, to perform a time sync request from Steam servers
  * @param complete optional callback when ready (or "ready" event fired)
  * @constructor
@@ -64,8 +68,13 @@ var SteamAuth = function SteamAuth(options, complete)
 		options = {};
 	}
 
+	if (options.secret)
+	{
+		self._secret = decodeSecretToBuffer(options.secret, options.encoding);
+	}
+
 	// synchronise time
-	if (typeof options.sync === "undefined" || options.sync)
+	if (!options.time && (typeof options.sync === "undefined" || options.sync))
 	{
 		// force resync
 		if (options.sync === true)
@@ -204,21 +213,60 @@ SteamAuth.Sync = function(complete)
 };
 
 /**
+ * Convienience class method for quick call to calculate authenticator code
+ *
+ * @param options secret key or options object (see SteamAuth::calculateCode)
+ * @param time optional time in ms
+ * @returns {string} authenticator code
+ */
+SteamAuth.calculateCode = function(options, time)
+{
+	if (typeof options === "string")
+	{
+		options = {secret:options};
+	}
+	if (time)
+	{
+		options.time = time;
+	}
+	var auth = new SteamAuth({sync:!options.time});
+	return auth.calculateCode(options);
+};
+
+/**
  * Calculate the SteamGuard code from the current or supplied time given Base32 secret key.
  * If the time is supplied, it must include any drift between the host and Steam servers.
  *
  * e.g. var code = new SteamAuth().calculateCode("STK7746GVMCHMNH5FBIAQXGPV3I7ZHRG");
+ *      var code = new SteamAuth({secret:"STK7746GVMCHMNH5FBIAQXGPV3I7ZHRG", encoding:"base32"}).calculateCode();
  *
- * @param secret Base32 (RFC3548) encoded secret key
+ * @param options Either Base32 (RFC3548) encoded secret key or options object {secret:encoded secret key,
+ *                time:time to use in ms, encoding:base32|base64|hex encoding of secret}
  * @param time optional time in ms
  * @returns {string} 5 character SteamGuard code
  */
-SteamAuth.prototype.calculateCode = function(secret, time)
+SteamAuth.prototype.calculateCode = function(options, time)
 {
+	if (!options)
+	{
+		options = {};
+	}
+	else if (typeof options === "string")
+	{
+		options = {secret:options};
+	}
+	if (time)
+	{
+		options.time = time;
+	}
+
+	var secret = options.secret || this._secret;
+
 	// convert secret from Base32 to buffer
-	var secretBuffer = base32.decode(secret);
+	var secretBuffer = decodeSecretToBuffer(secret, options.encoding);
 
 	// use the current or supplier time
+	time = options.time;
 	if (!time)
 	{
 		time = new Date().getTime() + SteamAuth.Offset;
@@ -226,7 +274,6 @@ SteamAuth.prototype.calculateCode = function(secret, time)
 
 	// calculate interval
 	var interval = Math.floor(time / SteamAuth.INTERVAL_PERIOD_MS);
-
 	var buffer = new Buffer(SteamAuth.INT64_BUFFER_SIZE);
 	buffer.writeUInt32BE(Math.floor(interval / SteamAuth.MAX_INT32), 0);
 	buffer.writeUInt32BE(interval % SteamAuth.MAX_INT32, 4);
@@ -249,5 +296,55 @@ SteamAuth.prototype.calculateCode = function(secret, time)
 
 	return code;
 };
+
+/**
+ * Decode a secret string from the given or guessed encoding into a Buffer
+ *
+ * @param secret encoded secret string
+ * @returns {*} Buffer containing secret
+ */
+function decodeSecretToBuffer(secret, encoding)
+{
+	if (!secret || secret instanceof Buffer)
+	{
+		return secret;
+	}
+
+	if (!encoding)
+	{
+		if (/^([ABCDEF0-9]{2})+$/i.test(secret))
+		{
+			// test for hex
+			encoding = "hex";
+		}
+		else if (/^[ABCDEFGHIJKLMNOPQRSTUVWXYZ234567]+$/.test(secret))
+		{
+			// test for base32
+			encoding = "base32";
+		}
+		else
+		{
+			// else probably base64
+			encoding = "base64";
+		}
+	}
+	// test for hex
+	if (encoding == "hex")
+	{
+		return new Buffer(secret, "hex");
+	}
+	else if (encoding == "base32")
+	{
+		return base32.decode(secret);
+	}
+	else if (encoding == "base64")
+	{
+		return new Buffer(secret, "base64");
+	}
+	else
+	{
+		throw {message:"Unknown encoding " + encoding};
+	}
+}
 
 module.exports = SteamAuth;
