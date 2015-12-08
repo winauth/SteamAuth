@@ -18,39 +18,41 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+ */
 
 // builtin
 var util = require('util');
 var EventEmitter = require('events').EventEmitter;
 var crypto = require("crypto");
-var http = require("http");
-var https = require("https");
-var Url = require("url");
 
 // external
+var _ = require('underscore');
 var base32 = require('rfc-3548-b32');
+var request = require("request");
+var async = require("async");
+var NodeRSA = require('node-rsa');
 
 /**
- * A SteamAuth instance used to generates SteamGuard authenticator codes
+ * Create a new SteamAuth object to create authenticator codes or communicate with Steam
+ * passing in either a secret key (base32) string or a config object of auth data.
  *
- * SteamAuth should be synced with Steam to ensure correct drift between the host and server times,
- * used to generate the correct codes. SteamAuth will get the latest server time from Steam by default,
- * but can be disabled by passing options {sync:false}.
+ * If passing in the secret data from the Steam mobile app (/data/data/com.valvesoftware.android.steam.community/files/SteamGuard-XXXXX),
+ * you must also add in the deviceid value from /data/data/com.valvesoftware.android.steam.community/shared_prefs/steam.uuid.xml
  *
- * usage:
+ * Currently, you only need to include deviceid, shared_secret, and identity_secret
  *
- *   var auth = new SteamAuth(); // time sync will happen for first instance
- *   auth.on("ready", function()
- *   {
- *     auth.calculateCode("ABCDEGHJ");
- *   });
+ * e.g.
+ *      var auth = new SteamAuth();
+ *      var auth = new SteamAuth("JHYTFVDHSKDHJASGD");
+ *      var auth = new SteamAuth({secret:"JHYTFVDHSKDHJASGD"});
+ *      var auth = new SteamAuth({
+ *        "deviceid":"android:0147986e-a56e-4c59-82df-5b04d813a3a8",
+ *        "shared_secret":"4H+kWXz5p5XHk2/5M0C2XQM=",
+ *        "identity_secret":"4i14n2+yOn5vq+495mQ+Yirw="
+ *        });
  *
- *   // or calculate code directly from SteamAuth - but the time must match Steam server
- *   var code = SteamAuth.calculateCode("ABCDEGHJ", new Date().getTime());
- *
- * @param options optional options object: sync: true(default)/false, to perform a time sync request from Steam servers
- * @param complete optional callback when ready (or "ready" event fired)
+ * @param options string secret or mobile app authenticator data
+ * @param complete callback(err)
  * @constructor
  */
 var SteamAuth = function SteamAuth(options, complete)
@@ -67,10 +69,20 @@ var SteamAuth = function SteamAuth(options, complete)
 	{
 		options = {};
 	}
-
-	if (options.secret)
+	if (typeof options === "string")
 	{
-		self._secret = decodeSecretToBuffer(options.secret, options.encoding);
+		options = {secret:options};
+	}
+
+	self.session = {};
+	self.auth = {};
+	if (options.shared_secret)
+	{
+		_.extend(self.auth, options);
+	}
+	else if (options.secret)
+	{
+		self.auth = {shared_secret: decodeSecretToBuffer(options.secret, options.encoding).toString("base64")};
 	}
 
 	// synchronise time
@@ -149,6 +161,8 @@ SteamAuth.ALPHABET = [
  * @type {string}
  */
 SteamAuth.SYNC_URL = "https://api.steampowered.com/ITwoFactorService/QueryTime/v0001";
+SteamAuth.COMMUNITY_BASE = "https://steamcommunity.com";
+SteamAuth.WEBAPI_BASE = "https://api.steampowered.com";
 
 SteamAuth.Offset = 0;
 
@@ -164,52 +178,382 @@ SteamAuth.Sync = function(complete)
 		return complete(null, SteamAuth.Offset);
 	}
 
-	var url = Url.parse(SteamAuth.SYNC_URL);
-	var protocol = (url.protocol === "https:" ? https : http);
-	protocol.request({
-			host: url.host,
-			port: url.port || (url.protocol === "https:" ? 443 : 80),
-			path: url.pathname,
-			method: "POST",
-			headers:{
-				accept: "*/*",
-				"Content-Type": "application/json",
-				"Content-Length": 0
-			}
-		},
-		function(response)
-		{
-			var body = "";
-			response.on("data", function(chunk)
+	request({
+				url:SteamAuth.SYNC_URL,
+				method:"POST",
+				headers:{
+					accept: "*/*",
+				},
+				json:true
+			},
+			function(err, response, body)
 			{
-				body += chunk;
-			});
-			response.on("end", function()
-			{
-				var data;
-				try
+				if (response.statusCode != 200)
 				{
-					data = JSON.parse(body);
-					if (!data.response || !data.response.server_time)
+					return complete({message:"Non 200 response from Steam"});
+				}
+
+				if (!body || !body.response || !body.response.server_time)
+				{
+					return complete({message:"Invalid time response from Steam"});
+				}
+
+				var servertime = parseInt(body.response.server_time) * 1000;
+				var offset = SteamAuth.Offset = new Date().getTime() - servertime;
+
+				complete(null, offset);
+			}
+	);
+};
+
+/**
+ * Internal function to perform correct request to Steam
+ *
+ * @param opts url, method, data, cookies and header
+ * @param complete callback with err and body
+ */
+SteamAuth.request = function(opts, complete)
+{
+	if (!opts.headers)
+	{
+		opts.headers = {};
+	}
+	_.extend(opts.headers, {
+		accept: "text/javascript, text/html, application/xml, text/xml, */*",
+		"User-Agent": "Mozilla/5.0 (Linux; U; Android 4.1.1; en-us; Google Nexus 4 - 4.1.1 - API 16 - 768x1280 Build/JRO03S) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30",
+		"Referrer": SteamAuth.COMMUNITY_BASE,
+		"X-Requested-With": "com.valvesoftware.android.steam.community"
+	});
+	if (!opts.cookies)
+	{
+		opts.cookies = request.jar();
+	}
+
+	var reqopts = {
+		url:opts.url,
+		method:opts.method || "GET",
+		headers:opts.headers,
+		jar:opts.cookies,
+		form:(opts.method == "POST" ? opts.data : null),
+		qs:(opts.method == "GET" ? opts.data : null),
+		json:!!opts.json
+	};
+
+	request(
+			reqopts,
+			function(err, response, body)
+			{
+				return complete(err, response, body);
+			}
+	);
+};
+
+/**
+ * Login to a new session or update an existing session (e.g. captcha)
+ *
+ * var client = new SteamAuth().login({username:"username", password:"password"}, complete);
+ *
+ * If callback returns error, it can be because of invalid password, invalid 2fa code or needing Captcha.
+ *
+ * @param opts object containing username and password
+ * @param complete callback returning (err, session)
+ */
+SteamAuth.prototype.login = function(opts, complete)
+{
+	var self = this;
+
+	if (!opts)
+	{
+		var err = {message: "opts parameter is required"};
+		self.emit("error", err);
+		if (complete)
+		{
+			complete(err);
+		}
+		return;
+	}
+
+	var session = self.session || {};
+
+	session.error = null;
+
+	var username = opts.username || session.username;
+	var password = opts.password || session.password;
+
+	var cookies = session.cookies = (session.cookies || request.jar());
+	cookies.setCookie(request.cookie("mobileClientVersion=3067969+%282.1.3%29"), SteamAuth.COMMUNITY_BASE + "/");
+	cookies.setCookie(request.cookie("mobileClient=android"), SteamAuth.COMMUNITY_BASE + "/");
+	cookies.setCookie(request.cookie("steamid="), SteamAuth.COMMUNITY_BASE + "/");
+	cookies.setCookie(request.cookie("steamLogin="), SteamAuth.COMMUNITY_BASE + "/");
+	cookies.setCookie(request.cookie("Steam_Language=english"), SteamAuth.COMMUNITY_BASE + "/");
+	cookies.setCookie(request.cookie("dob="), SteamAuth.COMMUNITY_BASE + "/");
+
+	async.series([
+				// get latest server time
+				function(complete)
+				{
+					SteamAuth.Sync(complete);
+				},
+
+				// setup initial cookies
+				function(complete)
+				{
+					if (session.oauth)
 					{
-						return complete({message:"Invalid time response from Steam"});
+						return complete();
 					}
 
-					var servertime = parseInt(data.response.server_time) * 1000;
-					var offset = SteamAuth.Offset = new Date().getTime() - servertime;
+					SteamAuth.request({
+						url:SteamAuth.COMMUNITY_BASE + "/login?oauth_client_id=DE45CD61&oauth_scope=read_profile%20write_profile%20read_client%20write_client",
+						cookies:cookies
+					}, function(err, response)
+					{
+						return complete(err);
+					});
+				},
 
-					complete(null, offset);
-				}
-				catch (ex)
+				// get RSA key
+				function(complete)
 				{
-					complete({message:"Invalid response: " + body});
+					if (session.oauth)
+					{
+						return complete();
+					}
+
+					SteamAuth.request({
+						url:SteamAuth.COMMUNITY_BASE + "/login/getrsakey",
+						method:"POST",
+						data:{username:username},
+						cookies:cookies,
+						json:true
+					}, function(err, response, body)
+					{
+						if (err)
+						{
+							return complete(err);
+						}
+						if (!body.success)
+						{
+							return complete({message:"Unknown user " + username});
+						}
+
+						session.timestamp = body.timestamp;
+						session.publicpem = createRsaPublicPem(body.publickey_mod, body.publickey_exp);
+
+						complete();
+					});
+				},
+
+				// perform login
+				function(complete)
+				{
+					if (session.oauth)
+					{
+						return complete();
+					}
+
+					var key = new NodeRSA(session.publicpem, "public", {encryptionScheme:"pkcs1"});
+					var epassword64 = key.encrypt(password, "base64", "utf8");
+
+					var twofactorcode = opts.twofactorcode || "";
+					if (!twofactorcode && self.auth && self.auth.shared_secret)
+					{
+						twofactorcode = self.calculateCode();
+					}
+
+					var response = SteamAuth.request({
+							url: SteamAuth.COMMUNITY_BASE + "/login/dologin/",
+							method: "POST",
+							data: {
+								username: username,
+								password: epassword64,
+								twofactorcode: twofactorcode,
+								emailauth: opts.emailauthtext || "",
+								loginfriendlyname: "#login_emailauth_friendlyname_mobile",
+								captchagid: opts.captchaid || "-1",
+								captcha_text: opts.captchatext || "enter above characters",
+								emailsteamid: (opts.emailauthtext ? session.steamid || "" : ""),
+								rsatimestamp: session.timestamp,
+								remember_login: "false",
+								oauth_client_id: "DE45CD61",
+								oauth_scope: "read_profile write_profile read_client write_client",
+								donotache: new Date().getTime()
+							},
+							cookies: cookies,
+							json:true
+						},
+						function(err, response, body)
+						{
+							if (err)
+							{
+								return complete(err);
+							}
+							if (!body)
+							{
+								return complete({message: "Invalid login response"});
+							}
+
+							if (body.emailsteamid)
+							{
+								session.steamid = body.emailsteamid;
+							}
+
+							if (!body.login_complete || !body.oauth)
+							{
+								if (body.captcha_needed)
+								{
+									// caller must provide {captchaid, captchatext}
+									var captchaid = body.captcha_gid;
+									var url = SteamAuth.COMMUNITY_BASE + "/public/captcha.php?gid=" + captchaid;
+									err = new Error("Need captcha for " + url);
+									err.captchaid = captchaid;
+									err.captchaurl = url;
+									return complete(err);
+								}
+
+								if (body.emailauth_needed)
+								{
+									// caller must provide {emailauthtext}
+									return complete(new Error("Need email auth code " + body.emaildomain || ""));
+								}
+
+								if (body.requires_twofactor)
+								{
+									// caller must provide {twofactorcode}
+									return complete(new Error("Need 2FA"));
+								}
+
+								return complete(new Error(body.message || "Invalid login"));
+							}
+
+							try
+							{
+								session.oauth = JSON.parse(body.oauth);
+							}
+							catch (ex)
+							{
+								complete(ex);
+							}
+							if (!session.oauth || !session.oauth.oauth_token)
+							{
+								return complete(new Error("Expected OAUTH token"));
+							}
+
+							if (session.oauth.steamid)
+							{
+								session.steamid = session.oauth.steamid;
+							}
+
+							complete();
+						}
+					);
 				}
-			});
-		}
-	).on("error", function(err)
+			],
+			function(err)
+			{
+				if (err)
+				{
+					return complete(err);
+				}
+
+				complete(null, session);
+			}
+	);
+};
+
+/**
+ * Get an array of current trade confirmation objects:
+ * {
+ *   id:confirmation id,
+ *   key:confirmation key,
+ *   image:<url of trader>,
+ *   online:(bool) if trader is online
+ *   details:description,
+ *   traded:item received,
+ *   when:time info
+ * }
+ *
+ * @param complete callback with error or trades array (err, trades)
+ */
+SteamAuth.prototype.getTradeConfirmations = function(complete)
+{
+	var self = this;
+
+	if (!self.session || !self.session.oauth)
 	{
-		complete(err);
-	}).end();
+		return complete({message:"not logged in"});
+	}
+
+	var servertime = Math.floor((new Date().getTime() + (SteamAuth.Offset || 0)) / 1000);
+	var timehash = createTimeHash(servertime, "conf", self.auth.identity_secret);
+
+	SteamAuth.request({
+			url: SteamAuth.COMMUNITY_BASE + "/mobileconf/conf",
+			method: "GET",
+			data: {
+				p: self.auth.deviceid,
+				a: self.session.steamid,
+				k: timehash,
+				t: servertime,
+				m: "android",
+				tag: "conf"
+			},
+			cookies: self.session.cookies,
+			json:true
+		},
+		function(err, response, body)
+		{
+			if (err)
+			{
+				return complete(err);
+			}
+
+			var trades = [];
+
+			var entriesReg = /"mobileconf_list_entry"([\s\S]*?)>([\s\S]*?)"mobileconf_list_entry_sep"/ig;
+			var entrymatch = entriesReg.exec(body);
+			while (entrymatch)
+			{
+				var ids = entrymatch[1];
+
+				//var match = /\sid\s*=\s*"([^"]+)"/i.exec(ids);
+				var match = /data-confid\s*=\s*"([^"]+)"/i.exec(ids);
+				if (match)
+				{
+					var trade = {};
+
+					trade.id = match[1];
+					match = /data-key\s*=\s*"([^"]+)"/i.exec(ids);
+					if (match)
+					{
+						trade.key = match[1];
+					}
+
+					var entry = entrymatch[2];
+					match = /"mobileconf_list_entry_icon"([\s\S]*?)src="([^"]+)"/i.exec(entry);
+					if (match)
+					{
+						trade.online = (match[1].indexOf("offline") == -1);
+						trade.image = match[2];
+					}
+
+					match = /"mobileconf_list_entry_description"[\s\S]*?<div>([^<]*)<\/div>\s*<div>([^<]*)<\/div>\s*<div>([^<]*)<\/div>\s*<\/div>/i.exec(entry);
+					if (match)
+					{
+						trade.details = match[1];
+						trade.traded = match[2];
+						trade.when = match[3];
+					}
+
+					trades.push(trade);
+				}
+
+				entrymatch = entriesReg.exec(body);
+			}
+
+			complete(null, trades);
+		}
+	);
 };
 
 /**
@@ -237,33 +581,46 @@ SteamAuth.calculateCode = function(options, time)
  * Calculate the SteamGuard code from the current or supplied time given Base32 secret key.
  * If the time is supplied, it must include any drift between the host and Steam servers.
  *
- * e.g. var code = new SteamAuth().calculateCode("STK7746GVMCHMNH5FBIAQXGPV3I7ZHRG");
- *      var code = new SteamAuth({secret:"STK7746GVMCHMNH5FBIAQXGPV3I7ZHRG", encoding:"base32"}).calculateCode();
- *
  * @param options Either Base32 (RFC3548) encoded secret key or options object {secret:encoded secret key,
  *                time:time to use in ms, encoding:base32|base64|hex encoding of secret}
- * @param time optional time in ms
  * @returns {string} 5 character SteamGuard code
  */
 SteamAuth.prototype.calculateCode = function(options, time)
 {
+	var self = this;
+
 	if (!options)
 	{
 		options = {};
 	}
 	else if (typeof options === "string")
 	{
-		options = {secret:options};
+		options = {shared_secret:decodeSecretToBuffer(options, "base32")};
 	}
 	if (time)
 	{
 		options.time = time;
 	}
 
-	var secret = options.secret || this._secret;
-
-	// convert secret from Base32 to buffer
-	var secretBuffer = decodeSecretToBuffer(secret, options.encoding);
+	var secretBuffer;
+	if (options.secret)
+	{
+		secretBuffer = decodeSecretToBuffer(options.secret, options.encoding || "base32");
+	}
+	else if (options.shared_secret)
+	{
+		secretBuffer = decodeSecretToBuffer(options.shared_secret, options.encoding || "base64");
+	}
+	else if (self.auth)
+	{
+		secretBuffer = decodeSecretToBuffer(self.auth.shared_secret, "base64");
+	}
+	else
+	{
+		var err = {message:"No secret key defined"};
+		self.emit("error", err);
+		throw err;
+	}
 
 	// use the current or supplier time
 	time = options.time;
@@ -345,6 +702,127 @@ function decodeSecretToBuffer(secret, encoding)
 	{
 		throw {message:"Unknown encoding " + encoding};
 	}
+}
+
+/**
+ * Convert a public key modulus and exponent into a pkcs8 pem
+ *
+ * @param modulus
+ * @param exponent
+ * @returns {string}
+ */
+function createRsaPublicPem(modulus, exponent)
+{
+	function prepadSigned(hexStr)
+	{
+		var msb = hexStr[0];
+		if ((msb>='8' && msb<='9') || (msb>='a' && msb<='f') || (msb>='A'&&msb<='F'))
+		{
+			return "00" + hexStr;
+		}
+		else
+		{
+			return hexStr;
+		}
+	}
+
+	function toHex(number)
+	{
+		var nstr = number.toString(16);
+		if (nstr.length % 2 === 0)
+		{
+			return nstr;
+		}
+		else
+		{
+			return "0" + nstr;
+		}
+	}
+
+	// encode ASN.1 DER length field
+	// if <=127, short form
+	// if >=128, long form
+	function encodeLengthHex(n)
+	{
+		if (n <= 127)
+		{
+			return toHex(n);
+		}
+		else
+		{
+			var n_hex = toHex(n);
+			var length_of_length_byte = 128 + n_hex.length/2; // 0x80+numbytes
+			return toHex(length_of_length_byte)+n_hex;
+		}
+	}
+
+	modulus = prepadSigned(modulus);
+	exponent = prepadSigned(exponent);
+
+	var modlen = modulus.length/2;
+	var explen = exponent.length/2;
+
+	var encoded_modlen = encodeLengthHex(modlen);
+	var encoded_explen = encodeLengthHex(explen);
+	var encoded_pubkey = "30" +
+			encodeLengthHex(
+					modlen +
+					explen +
+					encoded_modlen.length/2 +
+					encoded_explen.length/2 + 2
+			) +
+			"02" + encoded_modlen + modulus +
+			"02" + encoded_explen + exponent;
+
+	var seq2 = "30 0d " +
+			"06 09 2a 86 48 86 f7 0d 01 01 01" +
+			"05 00 " +
+			"03" + encodeLengthHex(encoded_pubkey.length/2 + 1) +
+			"00" + encoded_pubkey;
+
+	seq2 = seq2.replace(/ /g, "");
+
+	var der_hex = "30" + encodeLengthHex(seq2.length/2) + seq2;
+
+	der_hex = der_hex.replace(/ /g, "");
+
+	var der = new Buffer(der_hex, "hex");
+	var der_b64 = der.toString("base64");
+
+	return "-----BEGIN PUBLIC KEY-----\n" + der_b64.match(/.{1,64}/g).join("\n") + "\n-----END PUBLIC KEY-----\n";
+}
+
+/**
+ * Create the time hash for Steam mobile calls
+ *
+ * @param time current time
+ * @param tag operation tag
+ * @param secret identity_secret
+ * @returns base64 hash
+ */
+function createTimeHash(time, tag, secret)
+{
+	var b64secret = new Buffer(secret, "base64");
+
+	var bufferSize = 8;
+	if (tag)
+	{
+		bufferSize += Math.min(32, tag.length);
+	}
+	var buffer = new Buffer(bufferSize);
+
+	buffer.writeUInt32BE(Math.floor(time / SteamAuth.MAX_INT32), 0);
+	buffer.writeUInt32BE(time % SteamAuth.MAX_INT32, 4);
+
+	if (tag)
+	{
+		buffer.write(tag, 8, bufferSize - 8, "utf8");
+	}
+
+	var hmac = crypto.createHmac("sha1", b64secret);
+	var mac = hmac.update(buffer).digest();
+
+	return mac.toString("base64");
 }
 
 module.exports = SteamAuth;

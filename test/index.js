@@ -12,7 +12,7 @@ describe("SteamAuth", function()
 
 	it ("should perform a time sync", function(done)
 	{
-		this.timeout(10000);
+		//this.timeout(10000);
 
 		// if we want to mock the URL
 		//var uri = url.parse(SteamAuth.SYNC_URL);
@@ -103,6 +103,42 @@ describe("SteamAuth", function()
 		}
 
 		done();
+	});
+
+	it("should login and get confirmation", function(done)
+	{
+		if (!process.env["TEST_DEVICEID"])
+		{
+			return done(new Error("Requries environment variables: TEST_DEVICEID, TEST_SHAREDSECRET, TEST_IDENTITYSECRET, TEST_USERNAME and TEST_PASSWORD"));
+		}
+
+		//var uri = url.parse(SteamAuth.COMMUNITY_BASE + "/mobileconf/conf");
+		//nock(uri.protocol + "//" + uri.host).post(uri.pathname).reply(200, {response:{server_time:Math.floor(new Date().getTime() / 1000)}});
+
+		var auth = new SteamAuth({
+			"deviceid":process.env["TEST_DEVICEID"],
+			"shared_secret":process.env["TEST_SHAREDSECRET"],
+			"identity_secret":process.env["TEST_IDENTITYSECRET"]
+		});
+		auth.login({username:process.env["TEST_USERNAME"], password:process.env["TEST_PASSWORD"] }, function(err, session)
+		{
+			if (err)
+			{
+				return done(err);
+			}
+
+			auth.getTradeConfirmations(function(err, trades)
+			{
+				if (err)
+				{
+					return done(err);
+				}
+
+				console.log(trades);
+
+				done();
+			});
+		});
 	});
 
 });

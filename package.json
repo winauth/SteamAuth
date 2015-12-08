@@ -5,22 +5,27 @@
   "author": "Colin Mackie <winauth@gmail.com>",
   "main": "index.js",
   "dependencies": {
-    "rfc-3548-b32": "^0.0.2"
+    "rfc-3548-b32": "^0.0.2",
+    "underscore": "^1.8.3",
+    "async": "^1.5.0",
+    "node-rsa": "^0.2.26",
+    "request": "^2.67.0"
   },
   "devDependencies": {
-    "mocha": "^2.3.4",
-    "should": "^7.1.1",
-    "nock": "^3.3.2",
+    "mocha": "latest",
+    "should": "latest",
+    "nock": "latest",
     "jshint": "latest",
-    "uglify": "latest",
+    "uglify-js": "latest",
     "rimraf": "latest"
   },
   "scripts": {
-    "lint": "jshint **.js",
+    "lint": "jshint **.js || true",
     "wint": "for %f in (*.js) do jshint %f",
-    "uglify": "uglify index.js",
+    "uglify": "uglifyjs index.js -mt -o dist/steamauth.min.js",
     "test": "node_modules/.bin/mocha",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "build": "npm run clean && npm run wint && mkdir dist && npm run uglify"
   },
   "keywords": [
     "WinAuth",
