@@ -37,9 +37,6 @@ var NodeRSA = require('node-rsa');
  * passing in either a secret key (base32) string or a config object of auth data.
  *
  * If passing in the secret data from the Steam mobile app (/data/data/com.valvesoftware.android.steam.community/files/SteamGuard-XXXXX),
- * you must also add in the deviceid value from /data/data/com.valvesoftware.android.steam.community/shared_prefs/steam.uuid.xml
- *
- * Currently, you only need to include deviceid, shared_secret, and identity_secret
  *
  * e.g.
  *      var auth = new SteamAuth();
@@ -82,7 +79,8 @@ var SteamAuth = function SteamAuth(options, complete)
 	}
 	else if (options.secret)
 	{
-		self.auth = {shared_secret: decodeSecretToBuffer(options.secret, options.encoding).toString("base64")};
+		_.extend(self.auth, options);
+		self.auth.shared_secret = decodeSecretToBuffer(options.secret, options.encoding).toString("base64");
 	}
 
 	// synchronise time
@@ -249,9 +247,12 @@ SteamAuth.request = function(opts, complete)
 };
 
 /**
- * Login to a new session or update an existing session (e.g. captcha)
+ * Login to a new session or update an existing session (e.g. captcha).
  *
- * var client = new SteamAuth().login({username:"username", password:"password"}, complete);
+ * If not done already, you should add the deviceid value from
+ * /data/data/com.valvesoftware.android.steam.community/shared_prefs/steam.uuid.xml
+ *
+ * var client = new SteamAuth().login({username:"username", password:"password", deviceid:"android-123123"}, complete);
  *
  * If callback returns error, it can be because of invalid password, invalid 2fa code or needing Captcha.
  *
@@ -279,6 +280,11 @@ SteamAuth.prototype.login = function(opts, complete)
 
 	var username = opts.username || session.username;
 	var password = opts.password || session.password;
+
+	if (opts.deviceid)
+	{
+		self.auth.deviceid = opts.deviceid;
+	}
 
 	var cookies = session.cookies = (session.cookies || request.jar());
 	cookies.setCookie(request.cookie("mobileClientVersion=3067969+%282.1.3%29"), SteamAuth.COMMUNITY_BASE + "/");
