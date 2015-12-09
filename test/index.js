@@ -10,9 +10,20 @@ describe("SteamAuth", function()
 {
 	var interval = 48297900;
 
-	it ("should perform a time sync", function(done)
+	it ("should perform a static time sync", function(done)
 	{
-		//this.timeout(10000);
+		this.timeout(10000);
+
+		SteamAuth.Sync(function(err)
+		{
+			assert(Math.abs(SteamAuth.Offset) < 60000, "offset seems too large");
+			done(err);
+		});
+	});
+
+	it ("should create a new object", function(done)
+	{
+		this.timeout(10000);
 
 		// if we want to mock the URL
 		//var uri = url.parse(SteamAuth.SYNC_URL);
@@ -22,7 +33,7 @@ describe("SteamAuth", function()
 		auth.on("error", function(err)
 		{
 			done(err);
-		})
+		});
 		auth.on("ready", function()
 		{
 			assert(Math.abs(SteamAuth.Offset) < 60000, "offset seems too large");
@@ -107,20 +118,21 @@ describe("SteamAuth", function()
 
 	it("should login and get confirmation", function(done)
 	{
-		if (!process.env["TEST_DEVICEID"])
+		if (!process.env["STEAMAUTH_DEVICEID"])
 		{
-			return done(new Error("Requries environment variables: TEST_DEVICEID, TEST_SHAREDSECRET, TEST_IDENTITYSECRET, TEST_USERNAME and TEST_PASSWORD"));
+			console.log("Skipping test: requires environment variables: STEAMAUTH_DEVICEID, STEAMAUTH_SHAREDSECRET, STEAMAUTH_IDENTITYSECRET, STEAMAUTH_USERNAME and STEAMAUTH_PASSWORD");
+			return done();
 		}
 
 		//var uri = url.parse(SteamAuth.COMMUNITY_BASE + "/mobileconf/conf");
 		//nock(uri.protocol + "//" + uri.host).post(uri.pathname).reply(200, {response:{server_time:Math.floor(new Date().getTime() / 1000)}});
 
 		var auth = new SteamAuth({
-			"deviceid":process.env["TEST_DEVICEID"],
-			"shared_secret":process.env["TEST_SHAREDSECRET"],
-			"identity_secret":process.env["TEST_IDENTITYSECRET"]
+			"deviceid":process.env["STEAMAUTH_DEVICEID"],
+			"shared_secret":process.env["STEAMAUTH_SHAREDSECRET"],
+			"identity_secret":process.env["STEAMAUTH_IDENTITYSECRET"]
 		});
-		auth.login({username:process.env["TEST_USERNAME"], password:process.env["TEST_PASSWORD"] }, function(err, session)
+		auth.login({username:process.env["STEAMAUTH_USERNAME"], password:process.env["STEAMAUTH_PASSWORD"] }, function(err, session)
 		{
 			if (err)
 			{
@@ -136,9 +148,13 @@ describe("SteamAuth", function()
 
 				console.log(trades);
 
-				done();
+				return done();
+
+				//auth.rejectConfirmation(trades[0].id, trades[0].key, function(err, html)
+				//{
+				//	done();
+				//});
 			});
 		});
 	});
-
 });

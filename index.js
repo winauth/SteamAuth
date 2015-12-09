@@ -31,6 +31,7 @@ var base32 = require('rfc-3548-b32');
 var request = require("request");
 var async = require("async");
 var NodeRSA = require('node-rsa');
+var cheerio = require("cheerio");
 
 /**
  * Create a new SteamAuth object to create authenticator codes or communicate with Steam
@@ -171,9 +172,15 @@ SteamAuth.Offset = 0;
  */
 SteamAuth.Sync = function(complete)
 {
+	SteamAuth.Syncing = true;
+
 	if (SteamAuth.Offset)
 	{
-		return complete(null, SteamAuth.Offset);
+		setTimeout(function()
+		{
+			complete(null, SteamAuth.Offset);
+		}, 10);
+		return;
 	}
 
 	request({
@@ -490,8 +497,9 @@ SteamAuth.prototype.getTradeConfirmations = function(complete)
 		return complete({message:"not logged in"});
 	}
 
+	var tag = "conf";
 	var servertime = Math.floor((new Date().getTime() + (SteamAuth.Offset || 0)) / 1000);
-	var timehash = createTimeHash(servertime, "conf", self.auth.identity_secret);
+	var timehash = createTimeHash(servertime, tag, self.auth.identity_secret);
 
 	SteamAuth.request({
 			url: SteamAuth.COMMUNITY_BASE + "/mobileconf/conf",
@@ -502,7 +510,7 @@ SteamAuth.prototype.getTradeConfirmations = function(complete)
 				k: timehash,
 				t: servertime,
 				m: "android",
-				tag: "conf"
+				tag: tag
 			},
 			cookies: self.session.cookies,
 			json:true
@@ -516,49 +524,175 @@ SteamAuth.prototype.getTradeConfirmations = function(complete)
 
 			var trades = [];
 
-			var entriesReg = /"mobileconf_list_entry"([\s\S]*?)>([\s\S]*?)"mobileconf_list_entry_sep"/ig;
-			var entrymatch = entriesReg.exec(body);
-			while (entrymatch)
+			var $ = cheerio.load(body);
+			$(".mobileconf_list_entry").each(function()
 			{
-				var ids = entrymatch[1];
+				var $entry = $(this);
 
-				//var match = /\sid\s*=\s*"([^"]+)"/i.exec(ids);
-				var match = /data-confid\s*=\s*"([^"]+)"/i.exec(ids);
-				if (match)
+				var id = $entry.attr("data-confid");
+				if (id)
 				{
-					var trade = {};
+					var trade = {id:id};
+					trade.key = $entry.attr("data-key");
 
-					trade.id = match[1];
-					match = /data-key\s*=\s*"([^"]+)"/i.exec(ids);
-					if (match)
-					{
-						trade.key = match[1];
-					}
+					trade.image = $(".mobileconf_list_entry_icon img", $entry).attr("src");
 
-					var entry = entrymatch[2];
-					match = /"mobileconf_list_entry_icon"([\s\S]*?)src="([^"]+)"/i.exec(entry);
-					if (match)
-					{
-						trade.online = (match[1].indexOf("offline") == -1);
-						trade.image = match[2];
-					}
-
-					match = /"mobileconf_list_entry_description"[\s\S]*?<div>([^<]*)<\/div>\s*<div>([^<]*)<\/div>\s*<div>([^<]*)<\/div>\s*<\/div>/i.exec(entry);
-					if (match)
-					{
-						trade.details = match[1];
-						trade.traded = match[2];
-						trade.when = match[3];
-					}
+					var $details = $(".mobileconf_list_entry_description > div", $entry);
+					trade.details = $details.length > 0 ? $details.eq(0).html() : "";
+					trade.traded = $details.length > 1 ? $details.eq(1).html() : "";
+					trade.when = $details.length > 2 ? $details.eq(2).html() : "";
 
 					trades.push(trade);
 				}
-
-				entrymatch = entriesReg.exec(body);
-			}
+			});
 
 			complete(null, trades);
 		}
+	);
+};
+
+/**
+ * Reject a trade confirmation by its id and key from getTradeConfirmations
+ *
+ * @param id id of trade
+ * @param key key for trade
+ * @param complete (err) return err if error or failed
+ */
+SteamAuth.prototype.rejectConfirmation = function(id, key, complete)
+{
+	this.sendConfirmation(id, key, "cancel", complete);
+};
+
+/**
+ * Accept a trade confirmation by its id and key from getTradeConfirmations
+ *
+ * @param id id of trade
+ * @param key key for trade
+ * @param complete (err) return err if error or failed
+ */
+SteamAuth.prototype.acceptConfirmation = function(id, key, complete)
+{
+	this.sendConfirmation(id, key, "allow", complete);
+};
+
+/**
+ * Send a trade confirmation response
+ *
+ * @param id id of trade
+ * @param key key for trade
+ * @param tag tag of response, e.g "cancel", "allow"
+ * @param complete (err) if error or failed
+ * @returns {*}
+ */
+SteamAuth.prototype.sendConfirmation = function(id, key, tag, complete)
+{
+	var self = this;
+
+	if (!self.session || !self.session.oauth)
+	{
+		return complete({message:"not logged in"});
+	}
+
+	var servertime = Math.floor((new Date().getTime() + (SteamAuth.Offset || 0)) / 1000);
+	var timehash = createTimeHash(servertime, tag, self.auth.identity_secret);
+
+	SteamAuth.request({
+				url: SteamAuth.COMMUNITY_BASE + "/mobileconf/ajaxop",
+				method: "GET",
+				data: {
+					op: tag,
+					p: self.auth.deviceid,
+					a: self.session.steamid,
+					k: timehash,
+					t: servertime,
+					m: "android",
+					tag: tag,
+					cid: id,
+					ck: key
+				},
+				cookies: self.session.cookies,
+				json:true
+			},
+			function(err, response, body)
+			{
+				if (err)
+				{
+					return complete(err);
+				}
+				if (!body.success)
+				{
+					return complete(new Error("Unable to " + tag + " " + id));
+				}
+
+				complete();
+			}
+	);
+};
+
+/**
+ * Get full details about a trade confirmation
+ *
+ * NOT YET IMPLEMENTED
+ *
+ * @param id of of trade
+ * @param complete (err,trade) err if error occured, else trade object
+ * @returns {*}
+ */
+SteamAuth.prototype.getTradeConfirmation = function(id, complete)
+{
+	var self = this;
+
+	if (!self.session || !self.session.oauth)
+	{
+		return complete({message:"not logged in"});
+	}
+
+	var tag = "details" + id;
+	var servertime = Math.floor((new Date().getTime() + (SteamAuth.Offset || 0)) / 1000);
+	var timehash = createTimeHash(servertime, tag, self.auth.identity_secret);
+
+	SteamAuth.request({
+				url: SteamAuth.COMMUNITY_BASE + "/mobileconf/details/" + id,
+				method: "GET",
+				data: {
+					p: self.auth.deviceid,
+					a: self.session.steamid,
+					k: timehash,
+					t: servertime,
+					m: "android",
+					tag: tag
+				},
+				cookies: self.session.cookies,
+				json:true
+			},
+			function(err, response, body)
+			{
+				if (err)
+				{
+					return complete(err);
+				}
+				if (!body.success)
+				{
+					return complete(new Error("Unknown Conf " + id));
+				}
+
+				var $ = cheerio.load(body.html);
+				var $trade = $(".mobileconf_trade_area");
+				if (!$trade.length)
+				{
+					return complete(new Error("Cannot find trade"));
+				}
+
+				var trade = {partner:{}, items:[], receiving:[]};
+				var $partner = $(".trade_partner_header", $trade);
+				trade.partner.name = $(".trade_partner_headline_sub a", $partner).html();
+				trade.partner.steamid = /[\s\S]*\/profiles\/([\s\S]*)/i.exec($(".trade_partner_headline_sub a", $partner).attr("href"));
+				//trade.partner.icon = $(".trade_partner_icon img", $partner).attr("src");
+
+				//$(".tradeoffer_item.primary")
+
+				complete(null, trade, body.html);
+			}
 	);
 };
 

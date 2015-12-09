@@ -1,15 +1,16 @@
 {
   "name": "SteamAuth",
-  "version": "0.1.1",
-  "description": "SteamGuard code generator",
+  "version": "0.1.3",
+  "description": "SteamGuard code generator and trade confirmations",
   "author": "Colin Mackie <winauth@gmail.com>",
   "main": "index.js",
   "dependencies": {
-    "rfc-3548-b32": "^0.0.2",
     "underscore": "^1.8.3",
+    "rfc-3548-b32": "^0.0.2",
+    "request": "^2.67.0",
     "async": "^1.5.0",
     "node-rsa": "^0.2.26",
-    "request": "^2.67.0"
+    "cheerio": "^0.19.0"
   },
   "devDependencies": {
     "mocha": "latest",
@@ -30,7 +31,9 @@
   "keywords": [
     "WinAuth",
     "SteamGuard",
-    "Steam"
+    "Steam",
+    "Trading",
+    "Confirmations"
   ],
   "license": "GPLv3"
 }
