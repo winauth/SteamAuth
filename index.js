@@ -558,7 +558,7 @@ SteamAuth.prototype.getTradeConfirmations = function(complete)
  * @param key key for trade
  * @param complete (err) return err if error or failed
  */
-SteamAuth.prototype.rejectConfirmation = function(id, key, complete)
+SteamAuth.prototype.rejectTradeConfirmation = function(id, key, complete)
 {
 	this.sendConfirmation(id, key, "cancel", complete);
 };
@@ -570,7 +570,7 @@ SteamAuth.prototype.rejectConfirmation = function(id, key, complete)
  * @param key key for trade
  * @param complete (err) return err if error or failed
  */
-SteamAuth.prototype.acceptConfirmation = function(id, key, complete)
+SteamAuth.prototype.acceptTradeConfirmation = function(id, key, complete)
 {
 	this.sendConfirmation(id, key, "allow", complete);
 };

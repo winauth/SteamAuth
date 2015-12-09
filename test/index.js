@@ -150,7 +150,7 @@ describe("SteamAuth", function()
 
 				return done();
 
-				//auth.rejectConfirmation(trades[0].id, trades[0].key, function(err, html)
+				//auth.acceptTradeConfirmation(trades[0].id, trades[0].key, function(err, html)
 				//{
 				//	done();
 				//});
