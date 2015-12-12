@@ -5,7 +5,7 @@ Implementation of mobile SteamGuard 2FA codes and trading confirmations.
 
 ## Installation
 
-  npm install steamauth
+Expand latest SteamAuth-X.X.X.zip into your project folder.
 
 ## Usage
 
@@ -13,9 +13,9 @@ Implementation of mobile SteamGuard 2FA codes and trading confirmations.
 
 Add require.
 
-	var SteamAuth = require("steamauth");
+	var SteamAuth = require("./SteamAuth");
 
-In normal cases, a time-sync must be do either for SteamAuth or individual SteamAuth instances. This sets the drift between the host computer and Steam servers needed to calculate the correct code.
+In normal cases, a time-sync must be done either for SteamAuth or individual SteamAuth instances. This sets the drift between the host computer and Steam servers needed to calculate the correct code.
 
 	// Perform an initial time sync
 	SteamAuth.Sync(function(err)
@@ -126,8 +126,4 @@ Trades are returned as summary objects containing: id:string, key:string, detail
 ## Tests
 
 	npm test
-	
-## Release History
 
-* 0.1.3 Added trade confirmations
-* 0.1.1 Initial release

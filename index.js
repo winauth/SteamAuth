@@ -32,6 +32,7 @@ var request = require("request");
 var async = require("async");
 var NodeRSA = require('node-rsa');
 var cheerio = require("cheerio");
+var bunyan = require("bunyan");
 
 /**
  * Create a new SteamAuth object to create authenticator codes or communicate with Steam
@@ -70,6 +71,11 @@ var SteamAuth = function SteamAuth(options, complete)
 	if (typeof options === "string")
 	{
 		options = {secret:options};
+	}
+
+	if (options.loglevel)
+	{
+		SteamAuth.Logger.level(options.loglevel);
 	}
 
 	self.session = {};
@@ -121,6 +127,12 @@ var SteamAuth = function SteamAuth(options, complete)
 	}
 };
 util.inherits(SteamAuth, EventEmitter);
+
+/**
+ * Create default logger
+ */
+SteamAuth.Logger = bunyan.createLogger({name:"SteamAuth"});
+SteamAuth.Logger.level("warn");
 
 /**
  * Interval period i.e. 30 seconds
@@ -244,10 +256,21 @@ SteamAuth.request = function(opts, complete)
 		json:!!opts.json
 	};
 
+	SteamAuth.Logger.debug("Request", reqopts);
+
 	request(
 			reqopts,
 			function(err, response, body)
 			{
+				if (err)
+				{
+					SteamAuth.Logger.error("Response Error", response, body);
+				}
+				else
+				{
+					SteamAuth.Logger.debug("Response", reqopts);
+				}
+
 				return complete(err, response, body);
 			}
 	);
@@ -545,6 +568,8 @@ SteamAuth.prototype.getTradeConfirmations = function(complete)
 					trades.push(trade);
 				}
 			});
+
+			SteamAuth.Logger.info("GetTradeConfirmations", trades);
 
 			complete(null, trades);
 		}

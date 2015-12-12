@@ -130,7 +130,8 @@ describe("SteamAuth", function()
 		var auth = new SteamAuth({
 			"deviceid":process.env["STEAMAUTH_DEVICEID"],
 			"shared_secret":process.env["STEAMAUTH_SHAREDSECRET"],
-			"identity_secret":process.env["STEAMAUTH_IDENTITYSECRET"]
+			"identity_secret":process.env["STEAMAUTH_IDENTITYSECRET"],
+			loglevel:"info"
 		});
 		auth.login({username:process.env["STEAMAUTH_USERNAME"], password:process.env["STEAMAUTH_PASSWORD"] }, function(err, session)
 		{
