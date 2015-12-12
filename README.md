@@ -13,7 +13,9 @@ Expand latest SteamAuth-X.X.X.zip into your project folder.
 
 Add require.
 
-	var SteamAuth = require("./SteamAuth");
+	var SteamAuth = require("steamauth"); // if using npm registry
+	
+	var SteamAuth = require("./SteamAuth"); // if using zip file installation
 
 In normal cases, a time-sync must be done either for SteamAuth or individual SteamAuth instances. This sets the drift between the host computer and Steam servers needed to calculate the correct code.
 
@@ -123,6 +125,18 @@ Trades are returned as summary objects containing: id:string, key:string, detail
 		// trade has been rejected
 	});
 
+## Logging
+
+SteamAuth uses bunyan to log activity. You can get the logger instance at SteamAuth.Logger and set the level, e.g.
+
+	// change logging to be "debug"
+	var SteamAuth = require("steamauth");
+	SteamAuth.Logger.level("debug");
+	
+Levels are "error", "warn", "info" and "debug". The default level is "warn".
+
+Debug level logging will include all web request made to the Steam servers.
+	
 ## Tests
 
 	npm test
