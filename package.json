@@ -1,6 +1,6 @@
 {
   "name": "steamauth",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "SteamGuard code generator and trade confirmations",
   "author": "Colin Mackie <winauth@gmail.com>",
   "main": "index.js",
