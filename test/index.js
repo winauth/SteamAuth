@@ -131,7 +131,7 @@ describe("SteamAuth", function()
 			"deviceid":process.env["STEAMAUTH_DEVICEID"],
 			"shared_secret":process.env["STEAMAUTH_SHAREDSECRET"],
 			"identity_secret":process.env["STEAMAUTH_IDENTITYSECRET"],
-			loglevel:"info"
+			loglevel:"debug"
 		});
 		auth.login({username:process.env["STEAMAUTH_USERNAME"], password:process.env["STEAMAUTH_PASSWORD"] }, function(err, session)
 		{
@@ -149,13 +149,26 @@ describe("SteamAuth", function()
 
 				console.log(trades);
 
-				return done();
+				auth.refresh(function(err, success)
+				{
+					if (err)
+					{
+						return done(err);
+					}
 
-				//auth.acceptTradeConfirmation(trades[0].id, trades[0].key, function(err, html)
-				//{
-				//	done();
-				//});
+					auth.getTradeConfirmations(function(err, trades)
+					{
+						if (err)
+						{
+							return done(err);
+						}
+
+						return done();
+
+					});
+				});
 			});
+
 		});
 	});
 });

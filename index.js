@@ -174,6 +174,7 @@ SteamAuth.ALPHABET = [
 SteamAuth.SYNC_URL = "https://api.steampowered.com/ITwoFactorService/QueryTime/v0001";
 SteamAuth.COMMUNITY_BASE = "https://steamcommunity.com";
 SteamAuth.WEBAPI_BASE = "https://api.steampowered.com";
+SteamAuth.API_GETWGTOKEN = SteamAuth.WEBAPI_BASE + "/IMobileAuthService/GetWGToken/v0001";
 
 SteamAuth.Offset = 0;
 
@@ -268,7 +269,7 @@ SteamAuth.request = function(opts, complete)
 				}
 				else
 				{
-					SteamAuth.Logger.debug("Response", reqopts);
+					SteamAuth.Logger.debug("Response", reqopts, response, body);
 				}
 
 				return complete(err, response, body);
@@ -494,6 +495,50 @@ SteamAuth.prototype.login = function(opts, complete)
 
 				complete(null, session);
 			}
+	);
+};
+
+/**
+ * Refresh the login session to update cookies. Must be logged in.
+ *
+ * Will call a callback with error or success flag. e.g. refresh(function(err,success) { ... });
+ * If success is false, normal login is required.
+ *
+ * @param complete function(err, success)
+ */
+SteamAuth.prototype.refresh = function(complete)
+{
+	var self = this;
+	if (!self.session || !self.session.oauth)
+	{
+		return complete(null, false);
+	}
+
+	SteamAuth.request({
+			url: SteamAuth.API_GETWGTOKEN,
+			method: "POST",
+			data: {
+				access_token: self.session.oauth.oauth_token
+			},
+			cookies: self.session.cookies,
+			json:true
+		},
+		function(err, response, body)
+		{
+			if (err)
+			{
+				return complete(err);
+			}
+			if (!body || !body.response)
+			{
+				return complete(null, false);
+			}
+
+			self.session.cookies.setCookie(request.cookie("steamLogin=" + self.session.steamid + "%7C%7C" + body.response.token), SteamAuth.COMMUNITY_BASE + "/");
+			self.session.cookies.setCookie(request.cookie("steamLoginSecure=" + self.session.steamid + "%7C%7C" + body.response.token_secure), SteamAuth.COMMUNITY_BASE + "/");
+
+			complete(null, true);
+		}
 	);
 };
 
